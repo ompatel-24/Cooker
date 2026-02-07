@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getOrCreateUser } from "@/lib/getOrCreateUser";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+// need to configure this to save snowflake UID as recipeId when we have that working
+
 export async function POST(req) {
   const { appUser } = await getOrCreateUser();
   const { recipeId } = await req.json();
