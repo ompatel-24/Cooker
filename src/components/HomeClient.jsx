@@ -513,8 +513,8 @@ export default function HomeClient({ user }) {
                   )}
 
                   {appUser && (
-                    <div className="w-full mt-4 text-xs text-gray-500 dark:text-gray-400 text-center">
-                      Synced to Supabase user <span className="font-mono">{appUser.id}</span>
+                    <div className="w-full mt-4 text-xs text-gray-600 dark:text-gray-300 text-center">
+                      You’re signed in. Recipes you save will be stored to your account.
                     </div>
                   )}
                   {appUserError && (
