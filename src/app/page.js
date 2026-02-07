@@ -1,8 +1,200 @@
 "use client";
-import { useState } from 'react';
-import { FiUpload, FiSearch, FiChevronDown, FiChevronUp, FiClock } from 'react-icons/fi';
+import { useState, useRef, useCallback } from 'react';
+import { FiUpload, FiSearch, FiChevronDown, FiChevronUp, FiClock, FiPlay, FiPause, FiSkipForward, FiSkipBack, FiX, FiVolume2 } from 'react-icons/fi';
 
-const RecipeBlock = ({ recipe }) => {
+const CookingGuide = ({ recipe, onClose }) => {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [loadingAudio, setLoadingAudio] = useState(false);
+  const audioRef = useRef(null);
+  const totalSteps = recipe.steps.length;
+
+  const speakStep = useCallback(async (stepIndex) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    setLoadingAudio(true);
+    setIsPlaying(true);
+
+    const stepText = stepIndex === -1
+      ? `Let's start cooking ${recipe.title}. You'll need: ${recipe.ingredients.join(', ')}. When you're ready, move to step 1.`
+      : `Step ${stepIndex + 1} of ${totalSteps}. ${recipe.steps[stepIndex]}`;
+
+    try {
+      const resp = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: stepText }),
+      });
+
+      if (!resp.ok) throw new Error('TTS request failed');
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+      };
+
+      audio.onerror = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+      };
+
+      setLoadingAudio(false);
+      await audio.play();
+    } catch (err) {
+      console.error('Speech error:', err);
+      setLoadingAudio(false);
+      setIsPlaying(false);
+    }
+  }, [recipe, totalSteps]);
+
+  const handlePlayPause = () => {
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else if (audioRef.current && audioRef.current.paused && audioRef.current.src) {
+      audioRef.current.play();
+      setIsPlaying(true);
+    } else {
+      speakStep(currentStep === 0 ? -1 : currentStep - 1);
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep < totalSteps) {
+      const nextStep = currentStep + 1;
+      setCurrentStep(nextStep);
+      speakStep(nextStep - 1);
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentStep > 0) {
+      const prevStep = currentStep - 1;
+      setCurrentStep(prevStep);
+      speakStep(prevStep === 0 ? -1 : prevStep - 1);
+    }
+  };
+
+  const handleClose = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-5 flex justify-between items-center">
+          <div>
+            <p className="text-blue-100 text-xs font-medium uppercase tracking-wider">Cooking Guide</p>
+            <h3 className="text-white text-xl font-bold mt-1">{recipe.title}</h3>
+          </div>
+          <button
+            onClick={handleClose}
+            className="text-white/80 hover:text-white p-1 rounded-full hover:bg-white/20 transition-colors"
+          >
+            <FiX className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Progress bar */}
+        <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5">
+          <div
+            className="bg-blue-500 h-1.5 transition-all duration-500"
+            style={{ width: `${(currentStep / totalSteps) * 100}%` }}
+          />
+        </div>
+
+        {/* Step content */}
+        <div className="p-6 min-h-[200px] flex flex-col justify-center">
+          {currentStep === 0 ? (
+            <div>
+              <h4 className="font-semibold text-lg text-gray-800 dark:text-white mb-3">
+                Gather Your Ingredients
+              </h4>
+              <ul className="space-y-2">
+                {recipe.ingredients.map((ing, i) => (
+                  <li key={i} className="flex items-start text-gray-600 dark:text-gray-300">
+                    <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mt-1.5 mr-2 flex-shrink-0" />
+                    {ing}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center mb-4">
+                <span className="flex items-center justify-center h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 font-bold mr-3">
+                  {currentStep}
+                </span>
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Step {currentStep} of {totalSteps}
+                </span>
+              </div>
+              <p className="text-gray-700 dark:text-gray-200 text-lg leading-relaxed">
+                {recipe.steps[currentStep - 1]}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Controls */}
+        <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+          <div className="flex items-center justify-center space-x-4">
+            <button
+              onClick={handlePrev}
+              disabled={currentStep === 0}
+              className="p-3 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <FiSkipBack className="w-5 h-5" />
+            </button>
+
+            <button
+              onClick={handlePlayPause}
+              disabled={loadingAudio}
+              className="p-4 rounded-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white shadow-lg transition-colors"
+            >
+              {loadingAudio ? (
+                <div className="animate-spin h-6 w-6 border-2 border-white border-t-transparent rounded-full" />
+              ) : isPlaying ? (
+                <FiPause className="w-6 h-6" />
+              ) : (
+                <FiPlay className="w-6 h-6" />
+              )}
+            </button>
+
+            <button
+              onClick={handleNext}
+              disabled={currentStep >= totalSteps}
+              className="p-3 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <FiSkipForward className="w-5 h-5" />
+            </button>
+          </div>
+
+          {currentStep === totalSteps && (
+            <p className="text-center text-green-600 dark:text-green-400 font-medium mt-3">
+              You&apos;re done! Enjoy your meal.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RecipeBlock = ({ recipe, onStartCooking }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -103,6 +295,20 @@ const RecipeBlock = ({ recipe }) => {
               ))}
             </ol>
           </div>
+
+          {/* Cook This button */}
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onStartCooking(recipe);
+              }}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium rounded-full shadow-lg hover:shadow-xl transition-all duration-300"
+            >
+              <FiVolume2 className="w-5 h-5" />
+              Cook This — Voice Guide
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -116,6 +322,7 @@ export default function Home() {
   const [error, setError] = useState('');
   const [textInput, setTextInput] = useState('');
   const [textOutput, setTextOutput] = useState(null);
+  const [cookingRecipe, setCookingRecipe] = useState(null);
 
   const handleFileChange = e => {
     const file = e.target.files[0];
@@ -291,13 +498,20 @@ export default function Home() {
               </h2>
               <div>
                 {textOutput.recipes.map((recipe, i) => (
-                  <RecipeBlock key={i} recipe={recipe} />
+                  <RecipeBlock key={i} recipe={recipe} onStartCooking={setCookingRecipe} />
                 ))}
               </div>
             </div>
           )}
         </div>
       </main>
+
+      {cookingRecipe && (
+        <CookingGuide
+          recipe={cookingRecipe}
+          onClose={() => setCookingRecipe(null)}
+        />
+      )}
     </div>
   );
 }
