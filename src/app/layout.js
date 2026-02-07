@@ -1,18 +1,22 @@
 // layout.js
-import { Inter } from 'next/font/google'; // Replace Geist with standard font
+import { Inter } from 'next/font/google';
 import "./globals.css";
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({
+    subsets: ['latin'],
+    variable: '--font-inter',
+    display: 'swap',
+});
 
 export const metadata = {
     title: "Meal Snap",
-    description: "Generate recipes from your fridge contents",
+    description: "Snap your fridge, discover recipes",
 };
 
 export default function RootLayout({ children }) {
     return (
-        <html lang="en">
-        <body className={inter.className}>
+        <html lang="en" className={inter.variable}>
+        <body className={`${inter.className} min-h-screen`}>
         {children}
         </body>
         </html>
