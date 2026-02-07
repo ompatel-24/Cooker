@@ -1,6 +1,8 @@
 "use client";
 import { useState } from 'react';
 import { FiUpload, FiSearch, FiChevronDown, FiChevronUp, FiClock } from 'react-icons/fi';
+import { auth0 } from "@/lib/auth0";
+import LoginButton from "@/components/LoginButton";
 
 const RecipeBlock = ({ recipe }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -109,13 +111,15 @@ const RecipeBlock = ({ recipe }) => {
   );
 };
 
-export default function Home() {
+export default async function Home() {
   const [preview, setPreview] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [textInput, setTextInput] = useState('');
   const [textOutput, setTextOutput] = useState(null);
+  const session = await auth0.getSession();
+  const user = session?.user;
 
   const handleFileChange = e => {
     const file = e.target.files[0];
@@ -193,6 +197,23 @@ export default function Home() {
             Upload an image of your fridge and let AI suggest delicious recipes
           </p>
         </div>
+        {user ? (
+        <div className="space-y-4">
+          <div className="text-lg">Logged in as {user.name ?? user.email}</div>
+
+          <a
+            href="/auth/logout"
+            className="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-500 transition"
+          >
+            Log out
+          </a>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="text-lg">You are not logged in.</div>
+          <LoginButton />
+        </div>
+      )}
       </header>
       <main className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-3xl mx-auto">

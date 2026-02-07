@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@auth0/nextjs-auth0": "^4.14.1",
     "@mlc-ai/web-llm": "^0.2.78",
     "groq": "^3.81.0",
     "groq-sdk": "^0.17.0",
