@@ -35,6 +35,7 @@ export async function POST(req) {
 
     // --- Try external API first ---
     console.log("Trying external API first...");
+    console.log("Sending ingredients:", normalised);
     try {
       const externalResp = await fetch(
         "https://gemini-snowflake-cxc2026.onrender.com/recipes",
@@ -49,21 +50,48 @@ export async function POST(req) {
         }
       );
 
-      if (externalResp.ok) {
-        const externalData = await externalResp.json();
-        if (
-          externalData.recipes &&
-          Array.isArray(externalData.recipes) &&
-          externalData.recipes.length > 0
-        ) {
-          console.log(
-            `External API returned ${externalData.recipes.length} recipes`
-          );
-          recipes = externalData.recipes.slice(0, 3);
-        }
+      const externalData = await externalResp.json();
+      console.log(
+        "External API response:",
+        JSON.stringify(externalData).substring(0, 300)
+      );
+      console.log(
+        `External API returned ${Array.isArray(externalData) ? externalData.length : 0} items`
+      );
+
+      if (externalResp.ok && Array.isArray(externalData) && externalData.length > 0) {
+        console.log("External API SUCCESS - Converting recipes...");
+        recipes = externalData.slice(0, 3).map((item) => {
+          const parseArr = (val) => {
+            if (Array.isArray(val)) return val;
+            if (typeof val === "string") {
+              try {
+                return JSON.parse(val);
+              } catch {
+                return val.split(",").map((s) => s.trim());
+              }
+            }
+            return [];
+          };
+
+          return {
+            title: item.title,
+            ingredients: parseArr(item.NER || item.ingredients || "[]"),
+            steps: parseArr(item.directions || item.steps || "[]"),
+            time_to_make: item.time_to_make || "Unknown",
+            nutrition: {
+              calories: item.calories || "Unknown",
+              protein: item.protein || "Unknown",
+              fat: item.fat || "Unknown",
+              carbohydrates: item.carbs || "Unknown",
+            },
+          };
+        });
+      } else {
+        console.log("External API returned empty or error");
       }
     } catch (externalError) {
-      console.warn("External API call failed:", externalError);
+      console.warn("External API call failed:", externalError.message);
     }
 
     // --- Fallback to Snowflake if no external results ---
@@ -196,6 +224,65 @@ export async function POST(req) {
     }
 
     if (recipes.length === 0) {
+      // Fallback: Try external API if Snowflake returns nothing
+      console.log("Snowflake returned no results, trying external API...");
+      try {
+        const externalResp = await fetch(
+          "https://gemini-snowflake-cxc2026.onrender.com/recipes",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fridge_items: normalised,
+              prompt: prompt || "",
+            }),
+            signal: AbortSignal.timeout(10000),
+          }
+        );
+
+        const externalData = await externalResp.json();
+        console.log(
+          `External API returned ${Array.isArray(externalData) ? externalData.length : 0} recipes`
+        );
+
+        if (externalResp.ok && Array.isArray(externalData) && externalData.length > 0) {
+          // Convert external API format to our format
+          recipes = externalData.slice(0, 3).map((item) => {
+            const parseArr = (val) => {
+              if (Array.isArray(val)) return val;
+              if (typeof val === "string") {
+                try {
+                  return JSON.parse(val);
+                } catch {
+                  return val.split(",").map((s) => s.trim());
+                }
+              }
+              return [];
+            };
+
+            return {
+              title: item.title,
+              ingredients: parseArr(item.NER || item.ingredients || "[]"),
+              steps: parseArr(item.directions || item.steps || "[]"),
+              time_to_make: item.time_to_make || "Unknown",
+              nutrition: {
+                calories: item.calories || "Unknown",
+                protein: item.protein || "Unknown",
+                fat: item.fat || "Unknown",
+                carbohydrates: item.carbs || "Unknown",
+              },
+            };
+          });
+          console.log(`Successfully converted ${recipes.length} recipes from external API`);
+        } else {
+          console.log("External API returned no recipes or error");
+        }
+      } catch (externalError) {
+        console.warn("External API fallback failed:", externalError.message);
+      }
+    }
+
+    if (recipes.length === 0) {
       return NextResponse.json(
         {
           error:
@@ -217,11 +304,22 @@ export async function POST(req) {
     });
 
     // Clean up recipes (fix spelling, grammar, capitalization)
-    console.log("Cleaning recipes with Gemini...");
-    const cleanedRecipes = await cleanRecipes(enrichedRecipes);
-    console.log("Cleaned recipes received, returning to client...");
+    // Only if Gemini API key exists and we're not hitting quota
+    let finalRecipes = enrichedRecipes;
+    if (process.env.GEMINI_API_KEY) {
+      console.log("Cleaning recipes with Gemini...");
+      const cleanedRecipes = await cleanRecipes(enrichedRecipes);
+      if (cleanedRecipes && cleanedRecipes.length > 0) {
+        finalRecipes = cleanedRecipes;
+        console.log("Cleaned recipes received");
+      } else {
+        console.log("Gemini cleaning failed, returning original recipes");
+      }
+    } else {
+      console.log("Gemini API key not set, skipping recipe cleaning");
+    }
 
-    return NextResponse.json({ result: { recipes: cleanedRecipes } });
+    return NextResponse.json({ result: { recipes: finalRecipes } });
   } catch (error) {
     console.error("Generate error:", error);
     return NextResponse.json(
