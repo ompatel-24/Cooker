@@ -561,7 +561,7 @@ export default function HomeClient({ user }) {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-bold">Cooker</h1>
+                  <h1 className="text-2xl font-bold">Meal Snap</h1>
                 </div>
                 <p className="text-sm text-white/80">
                   Fridge-to-fork ideas powered by AI
@@ -598,7 +598,7 @@ export default function HomeClient({ user }) {
                 Turn fridge photos into recipes in seconds.
               </h2>
               <p className="text-lg text-white/85 max-w-2xl">
-                Upload what you have, tell us what you crave, and Cooker drafts ready-to-cook recipes with nutrition, timing, and step-by-step guidance.
+                Upload what you have, tell us what you crave, and Meal Snap drafts ready-to-cook recipes with nutrition, timing, and step-by-step guidance.
               </p>
 
               <div className="flex flex-wrap gap-3">

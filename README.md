@@ -77,4 +77,4 @@ Snap a pic, and let Meal Snap take care of the rest!
 
 **[Slideshow Presentation](https://docs.google.com/presentation/d/1xCiC3NrRe4zZLrtuUNbp4aLKXeHvchUT1kE2egLoD1s/edit?usp=sharing)**# Meal-Snap
 # Meal-Snap
-# Cooker
+# Meal Snap
