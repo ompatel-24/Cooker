@@ -530,6 +530,7 @@ export default function HomeClient({ user }) {
           title: recipe.title,
           ingredients: recipe.ingredients || [],
           directions: recipe.steps || recipe.directions || [],
+          nutrition: recipe.nutrition || null,
         }),
       });
       const json = await resp.json();
@@ -848,7 +849,7 @@ export default function HomeClient({ user }) {
                         title: recipe.title,
                         ingredients: recipe.ingredients || [],
                         steps: recipe.directions || recipe.steps || [],
-                        nutrition: {},
+                        nutrition: recipe.nutrition || {},
                         time_to_make: recipe.time_to_make || "—",
                       }}
                       onSave={saveRecipe}

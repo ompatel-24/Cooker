@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req) {
   const { appUser } = await getOrCreateUser();
-  const { title, ingredients, directions } = await req.json();
+  const { title, ingredients, directions, nutrition } = await req.json();
 
   if (!title || typeof title !== "string") {
     return NextResponse.json({ error: "title required" }, { status: 400 });
@@ -22,6 +22,11 @@ export async function POST(req) {
       ? directions.map((d) => String(d).trim()).filter(Boolean)
       : [];
 
+  const normalizedNutrition =
+    nutrition && typeof nutrition === "object" && !Array.isArray(nutrition)
+      ? nutrition
+      : null;
+
   const { error } = await supabaseAdmin
     .from("saved_recipes")
     .upsert({
@@ -29,13 +34,19 @@ export async function POST(req) {
       title,
       ingredients: normalizedIngredients,
       directions: normalizedDirections,
+      nutrition: normalizedNutrition,
     });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({
     ok: true,
-    recipe: { title, ingredients: normalizedIngredients, directions: normalizedDirections },
+    recipe: {
+      title,
+      ingredients: normalizedIngredients,
+      directions: normalizedDirections,
+      nutrition: normalizedNutrition,
+    },
   });
 }
 
@@ -44,7 +55,7 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from("saved_recipes")
-    .select("title, ingredients, directions, created_at")
+    .select("title, ingredients, directions, nutrition, created_at")
     .eq("user_id", appUser.id)
     .order("created_at", { ascending: false });
 
