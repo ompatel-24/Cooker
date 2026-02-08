@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { querySnowflake } from "@/lib/snowflake";
-import { generateCookingTip, generateRecipeVariations } from "@/lib/gemini";
+import { generateCookingTip, generateRecipeVariations, cleanRecipes } from "@/lib/gemini";
 
 /**
  * POST /api/generate
@@ -206,35 +206,22 @@ export async function POST(req) {
     }
 
     // Enrich all recipes (from either source) with Gemini tips and variations
-    const enrichedRecipes = await Promise.all(
-      recipes.map(async (recipe) => {
-        let aiTip = null;
-        let aiVariations = { healthier: null, faster: null };
+    const enrichedRecipes = recipes.map((recipe) => {
+      return {
+        ...recipe,
+        ai: {
+          tip: null,
+          variations: { healthier: null, faster: null },
+        },
+      };
+    });
 
-        if (process.env.GEMINI_API_KEY) {
-          try {
-            const [tip, variations] = await Promise.all([
-              generateCookingTip(recipe, normalised),
-              generateRecipeVariations(recipe, normalised),
-            ]);
-            aiTip = tip;
-            aiVariations = variations;
-          } catch (geminiError) {
-            console.warn("Gemini enrichment failed:", geminiError);
-          }
-        }
+    // Clean up recipes (fix spelling, grammar, capitalization)
+    console.log("Cleaning recipes with Gemini...");
+    const cleanedRecipes = await cleanRecipes(enrichedRecipes);
+    console.log("Cleaned recipes received, returning to client...");
 
-        return {
-          ...recipe,
-          ai: {
-            tip: aiTip,
-            variations: aiVariations,
-          },
-        };
-      })
-    );
-
-    return NextResponse.json({ result: { recipes: enrichedRecipes } });
+    return NextResponse.json({ result: { recipes: cleanedRecipes } });
   } catch (error) {
     console.error("Generate error:", error);
     return NextResponse.json(
