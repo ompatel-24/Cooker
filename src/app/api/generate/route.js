@@ -31,58 +31,72 @@ export async function POST(req) {
       );
     }
 
-    let rows = [];
+    let recipes = [];
 
-    if (normalised.length > 0) {
-      // --- Ingredient-based search using fuzzy ILIKE matching ---
-      // For each detected ingredient, count how many recipe ingredients
-      // contain that word (e.g. "tomato" matches "diced tomatoes").
-      // We build a SUM of CASE expressions for each detected ingredient.
-      const matchCases = normalised
-        .map(
-          (_, idx) =>
-            `MAX(CASE WHEN LOWER(f.VALUE::STRING) ILIKE ? THEN 1 ELSE 0 END)`
-        )
-        .join(" + ");
+    // --- Try external API first ---
+    console.log("Trying external API first...");
+    try {
+      const externalResp = await fetch(
+        "https://gemini-snowflake-cxc2026.onrender.com/recipes",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fridge_items: normalised,
+            prompt: prompt || "",
+          }),
+          signal: AbortSignal.timeout(10000),
+        }
+      );
 
-      const ingredientBinds = normalised.map((ing) => `%${ing}%`);
-
-      let promptClause = "";
-      const promptBinds = [];
-      if (promptKeywords.length > 0) {
-        const conditions = promptKeywords.map(() => "LOWER(r.TITLE) ILIKE ?");
-        promptClause = `HAVING (${conditions.join(" OR ")})`;
-        promptKeywords.forEach((kw) => promptBinds.push(`%${kw}%`));
+      if (externalResp.ok) {
+        const externalData = await externalResp.json();
+        if (
+          externalData.recipes &&
+          Array.isArray(externalData.recipes) &&
+          externalData.recipes.length > 0
+        ) {
+          console.log(
+            `External API returned ${externalData.recipes.length} recipes`
+          );
+          recipes = externalData.recipes.slice(0, 3);
+        }
       }
+    } catch (externalError) {
+      console.warn("External API call failed:", externalError);
+    }
 
-      // Use FLATTEN to check each recipe's ingredients array, then
-      // aggregate back to get a match score per recipe.
-      const sql = `
-        SELECT
-          r.TITLE,
-          r.INGREDIENTS,
-          r.STEPS,
-          r.TIME_TO_MAKE,
-          r.CALORIES,
-          r.PROTEIN_G,
-          r.FAT_G,
-          r.CARBS_G,
-          (${matchCases}) AS MATCH_SCORE
-        FROM RECIPES r,
-          TABLE(FLATTEN(input => r.INGREDIENTS)) f
-        GROUP BY r.ID, r.TITLE, r.INGREDIENTS, r.STEPS, r.TIME_TO_MAKE,
-                 r.CALORIES, r.PROTEIN_G, r.FAT_G, r.CARBS_G
-        HAVING MATCH_SCORE > 0
-        ${promptClause ? `AND (${promptClause.replace("HAVING ", "")})` : ""}
-        ORDER BY MATCH_SCORE DESC, r.CALORIES ASC
-        LIMIT 3
-      `;
+    // --- Fallback to Snowflake if no external results ---
+    if (recipes.length === 0) {
+      console.log("External API returned no results, trying Snowflake...");
 
-      rows = await querySnowflake(sql, [...ingredientBinds, ...promptBinds]);
+      let rows = [];
 
-      // Fallback: drop prompt filter if no results
-      if (rows.length === 0 && promptBinds.length > 0) {
-        const fallbackSql = `
+      if (normalised.length > 0) {
+        // --- Ingredient-based search using fuzzy ILIKE matching ---
+        // For each detected ingredient, count how many recipe ingredients
+        // contain that word (e.g. "tomato" matches "diced tomatoes").
+        // We build a SUM of CASE expressions for each detected ingredient.
+        const matchCases = normalised
+          .map(
+            (_, idx) =>
+              `MAX(CASE WHEN LOWER(f.VALUE::STRING) ILIKE ? THEN 1 ELSE 0 END)`
+          )
+          .join(" + ");
+
+        const ingredientBinds = normalised.map((ing) => `%${ing}%`);
+
+        let promptClause = "";
+        const promptBinds = [];
+        if (promptKeywords.length > 0) {
+          const conditions = promptKeywords.map(() => "LOWER(r.TITLE) ILIKE ?");
+          promptClause = `HAVING (${conditions.join(" OR ")})`;
+          promptKeywords.forEach((kw) => promptBinds.push(`%${kw}%`));
+        }
+
+        // Use FLATTEN to check each recipe's ingredients array, then
+        // aggregate back to get a match score per recipe.
+        const sql = `
           SELECT
             r.TITLE,
             r.INGREDIENTS,
@@ -98,45 +112,62 @@ export async function POST(req) {
           GROUP BY r.ID, r.TITLE, r.INGREDIENTS, r.STEPS, r.TIME_TO_MAKE,
                    r.CALORIES, r.PROTEIN_G, r.FAT_G, r.CARBS_G
           HAVING MATCH_SCORE > 0
+          ${promptClause ? `AND (${promptClause.replace("HAVING ", "")})` : ""}
           ORDER BY MATCH_SCORE DESC, r.CALORIES ASC
           LIMIT 3
         `;
-        rows = await querySnowflake(fallbackSql, ingredientBinds);
+
+        rows = await querySnowflake(sql, [...ingredientBinds, ...promptBinds]);
+
+        // Fallback: drop prompt filter if no results
+        if (rows.length === 0 && promptBinds.length > 0) {
+          const fallbackSql = `
+            SELECT
+              r.TITLE,
+              r.INGREDIENTS,
+              r.STEPS,
+              r.TIME_TO_MAKE,
+              r.CALORIES,
+              r.PROTEIN_G,
+              r.FAT_G,
+              r.CARBS_G,
+              (${matchCases}) AS MATCH_SCORE
+            FROM RECIPES r,
+              TABLE(FLATTEN(input => r.INGREDIENTS)) f
+            GROUP BY r.ID, r.TITLE, r.INGREDIENTS, r.STEPS, r.TIME_TO_MAKE,
+                     r.CALORIES, r.PROTEIN_G, r.FAT_G, r.CARBS_G
+            HAVING MATCH_SCORE > 0
+            ORDER BY MATCH_SCORE DESC, r.CALORIES ASC
+            LIMIT 3
+          `;
+          rows = await querySnowflake(fallbackSql, ingredientBinds);
+        }
+      } else {
+        // --- Prompt-only search (no ingredients detected) ---
+        const conditions = promptKeywords.map(() => "LOWER(r.TITLE) ILIKE ?");
+        const sql = `
+          SELECT
+            r.TITLE,
+            r.INGREDIENTS,
+            r.STEPS,
+            r.TIME_TO_MAKE,
+            r.CALORIES,
+            r.PROTEIN_G,
+            r.FAT_G,
+            r.CARBS_G
+          FROM RECIPES r
+          WHERE ${conditions.join(" OR ")}
+          ORDER BY r.CALORIES ASC
+          LIMIT 3
+        `;
+        rows = await querySnowflake(
+          sql,
+          promptKeywords.map((kw) => `%${kw}%`)
+        );
       }
-    } else {
-      // --- Prompt-only search (no ingredients detected) ---
-      const conditions = promptKeywords.map(() => "LOWER(r.TITLE) ILIKE ?");
-      const sql = `
-        SELECT
-          r.TITLE,
-          r.INGREDIENTS,
-          r.STEPS,
-          r.TIME_TO_MAKE,
-          r.CALORIES,
-          r.PROTEIN_G,
-          r.FAT_G,
-          r.CARBS_G
-        FROM RECIPES r
-        WHERE ${conditions.join(" OR ")}
-        ORDER BY r.CALORIES ASC
-        LIMIT 3
-      `;
-      rows = await querySnowflake(
-        sql,
-        promptKeywords.map((kw) => `%${kw}%`)
-      );
-    }
 
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { error: "No matching recipes found. Try different ingredients or a different prompt." },
-        { status: 404 }
-      );
-    }
-
-    // Map Snowflake rows → frontend recipe schema
-    const recipes = await Promise.all(
-      rows.map(async (row) => {
+      // Convert Snowflake rows to recipe format
+      recipes = rows.map((row) => {
         const parseArr = (val) => {
           if (Array.isArray(val)) return val;
           if (typeof val === "string") {
@@ -149,31 +180,10 @@ export async function POST(req) {
           return [];
         };
 
-        const ingredients = parseArr(row.INGREDIENTS);
-        const steps = parseArr(row.STEPS);
-
-        // Enrich with Gemini AI tips and variations
-        let aiTip = null;
-        let aiVariations = { healthier: null, faster: null };
-        
-        if (process.env.GEMINI_API_KEY) {
-          try {
-            const [tip, variations] = await Promise.all([
-              generateCookingTip({ title: row.TITLE, ingredients, steps }, normalised),
-              generateRecipeVariations({ title: row.TITLE, ingredients, steps }, normalised),
-            ]);
-            aiTip = tip;
-            aiVariations = variations;
-          } catch (geminiError) {
-            console.warn("Gemini enrichment failed:", geminiError);
-            // Continue without AI enrichment
-          }
-        }
-
         return {
           title: row.TITLE,
-          ingredients,
-          steps,
+          ingredients: parseArr(row.INGREDIENTS),
+          steps: parseArr(row.STEPS),
           time_to_make: row.TIME_TO_MAKE || "Unknown",
           nutrition: {
             calories: `${Math.round(row.CALORIES || 0)} kcal`,
@@ -181,6 +191,41 @@ export async function POST(req) {
             fat: `${Math.round(row.FAT_G || 0)}g`,
             carbohydrates: `${Math.round(row.CARBS_G || 0)}g`,
           },
+        };
+      });
+    }
+
+    if (recipes.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "No matching recipes found. Try different ingredients or a different prompt.",
+        },
+        { status: 404 }
+      );
+    }
+
+    // Enrich all recipes (from either source) with Gemini tips and variations
+    const enrichedRecipes = await Promise.all(
+      recipes.map(async (recipe) => {
+        let aiTip = null;
+        let aiVariations = { healthier: null, faster: null };
+
+        if (process.env.GEMINI_API_KEY) {
+          try {
+            const [tip, variations] = await Promise.all([
+              generateCookingTip(recipe, normalised),
+              generateRecipeVariations(recipe, normalised),
+            ]);
+            aiTip = tip;
+            aiVariations = variations;
+          } catch (geminiError) {
+            console.warn("Gemini enrichment failed:", geminiError);
+          }
+        }
+
+        return {
+          ...recipe,
           ai: {
             tip: aiTip,
             variations: aiVariations,
@@ -189,7 +234,7 @@ export async function POST(req) {
       })
     );
 
-    return NextResponse.json({ result: { recipes } });
+    return NextResponse.json({ result: { recipes: enrichedRecipes } });
   } catch (error) {
     console.error("Generate error:", error);
     return NextResponse.json(
