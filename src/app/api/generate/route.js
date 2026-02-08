@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { querySnowflake } from "@/lib/snowflake";
+import { generateCookingTip, generateRecipeVariations } from "@/lib/gemini";
 
 /**
  * POST /api/generate
@@ -134,32 +135,59 @@ export async function POST(req) {
     }
 
     // Map Snowflake rows → frontend recipe schema
-    const recipes = rows.map((row) => {
-      const parseArr = (val) => {
-        if (Array.isArray(val)) return val;
-        if (typeof val === "string") {
+    const recipes = await Promise.all(
+      rows.map(async (row) => {
+        const parseArr = (val) => {
+          if (Array.isArray(val)) return val;
+          if (typeof val === "string") {
+            try {
+              return JSON.parse(val);
+            } catch {
+              return [];
+            }
+          }
+          return [];
+        };
+
+        const ingredients = parseArr(row.INGREDIENTS);
+        const steps = parseArr(row.STEPS);
+
+        // Enrich with Gemini AI tips and variations
+        let aiTip = null;
+        let aiVariations = { healthier: null, faster: null };
+        
+        if (process.env.GEMINI_API_KEY) {
           try {
-            return JSON.parse(val);
-          } catch {
-            return [];
+            const [tip, variations] = await Promise.all([
+              generateCookingTip({ title: row.TITLE, ingredients, steps }, normalised),
+              generateRecipeVariations({ title: row.TITLE, ingredients, steps }, normalised),
+            ]);
+            aiTip = tip;
+            aiVariations = variations;
+          } catch (geminiError) {
+            console.warn("Gemini enrichment failed:", geminiError);
+            // Continue without AI enrichment
           }
         }
-        return [];
-      };
 
-      return {
-        title: row.TITLE,
-        ingredients: parseArr(row.INGREDIENTS),
-        steps: parseArr(row.STEPS),
-        time_to_make: row.TIME_TO_MAKE || "Unknown",
-        nutrition: {
-          calories: `${Math.round(row.CALORIES || 0)} kcal`,
-          protein: `${Math.round(row.PROTEIN_G || 0)}g`,
-          fat: `${Math.round(row.FAT_G || 0)}g`,
-          carbohydrates: `${Math.round(row.CARBS_G || 0)}g`,
-        },
-      };
-    });
+        return {
+          title: row.TITLE,
+          ingredients,
+          steps,
+          time_to_make: row.TIME_TO_MAKE || "Unknown",
+          nutrition: {
+            calories: `${Math.round(row.CALORIES || 0)} kcal`,
+            protein: `${Math.round(row.PROTEIN_G || 0)}g`,
+            fat: `${Math.round(row.FAT_G || 0)}g`,
+            carbohydrates: `${Math.round(row.CARBS_G || 0)}g`,
+          },
+          ai: {
+            tip: aiTip,
+            variations: aiVariations,
+          },
+        };
+      })
+    );
 
     return NextResponse.json({ result: { recipes } });
   } catch (error) {
