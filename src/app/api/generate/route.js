@@ -149,6 +149,7 @@ export async function POST(req) {
 
         // Fallback: drop prompt filter if no results
         if (rows.length === 0 && promptBinds.length > 0) {
+          console.log("Snowflake returned 0 with prompt, trying without prompt...");
           const fallbackSql = `
             SELECT
               r.TITLE,
@@ -169,6 +170,9 @@ export async function POST(req) {
             LIMIT 3
           `;
           rows = await querySnowflake(fallbackSql, ingredientBinds);
+          console.log(`Snowflake fallback returned ${rows.length} recipes`);
+        } else {
+          console.log(`Snowflake returned ${rows.length} recipes`);
         }
       } else {
         // --- Prompt-only search (no ingredients detected) ---
@@ -192,8 +196,10 @@ export async function POST(req) {
           sql,
           promptKeywords.map((kw) => `%${kw}%`)
         );
+        console.log(`Snowflake prompt-only search returned ${rows.length} recipes`);
       }
 
+      console.log(`Converting ${rows.length} Snowflake rows to recipes...`);
       // Convert Snowflake rows to recipe format
       recipes = rows.map((row) => {
         const parseArr = (val) => {
