@@ -1,71 +1,172 @@
-import { NextResponse } from 'next/server';
-import Groq from 'groq-sdk';
+import { NextResponse } from "next/server";
+import { querySnowflake } from "@/lib/snowflake";
 
-const groq = new Groq({ apiKey: process.env.NEXT_PUBLIC_GROQ });
-
+/**
+ * POST /api/generate
+ * Body: { prompt: string, ingredients: string[] }
+ *
+ * Queries Snowflake for the top 3 recipes that best match the detected
+ * ingredients and/or prompt keywords. Uses fuzzy (ILIKE) matching so
+ * "tomato" matches "diced tomatoes", "tomato sauce", etc.
+ */
 export async function POST(req) {
-    try {
-        const { prompt, ingredients } = await req.json();
+  try {
+    const { prompt, ingredients } = await req.json();
 
-        const messages = [
-            {
-                role: 'system',
-                content: `You are provided with:
-                    1. Detected Ingredients: ${ingredients.join(', ')}
-                    2. User Prompt: ${prompt}
-                    
-                    Generate at least 3 or more recipes based on the provided information, the ingredients should be the main part of the dish.
-                    All information MUST be filled. Your response must be a valid JSON object with the following structure:
-                    "recipes": [
-                        {
-                          "title": "Recipe Name",
-                          "ingredients": ["ingredient 1", "ingredient 2", ...],
-                          "steps": ["step 1", "step 2", ...],
-                          "time_to_make": "30 minutes",
-                          "nutrition": {
-                            "calories": "350 kcal",
-                            "protein": "15g",
-                            "carbs": "40g",
-                            "fat": "10g"
-                          }
-                        },
-                        { … },
-                        { … }
-                     ]`
-            },
-            { role: 'user', content: prompt }
-        ];
+    const normalised = (Array.isArray(ingredients) ? ingredients : [])
+      .map((i) => i.toLowerCase().trim())
+      .filter(Boolean);
 
-        const completion = await groq.chat.completions.create({
-            messages,
-            model: 'llama-3.1-8b-instant',
-            response_format: { type: "json_object" },
-            temperature: 0.7
-        });
+    const promptKeywords = (prompt || "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .slice(0, 5);
 
-        let responseContent = completion.choices[0].message.content;
-
-        const jsonMatch = responseContent.match(/```json\s*(\{[\s\S]*?\})\s*```/);
-        if (jsonMatch) {
-            responseContent = jsonMatch[1];
-        }
-
-        try {
-            const parsedContent = JSON.parse(responseContent);
-            return NextResponse.json({ result: parsedContent });
-        } catch (parseError) {
-            console.error('failed:', parseError);
-            console.log('need to parse:', responseContent);
-            return NextResponse.json(
-                { error: 'not valid format' },
-                { status: 500 }
-            );
-        }
-    } catch (error) {
-        console.error('error:', error);
-        return NextResponse.json(
-            { error: 'failed to generate recipe' },
-            { status: 500 }
-        );
+    if (normalised.length === 0 && promptKeywords.length === 0) {
+      return NextResponse.json(
+        { error: "Please provide ingredients or a search prompt" },
+        { status: 400 }
+      );
     }
+
+    let rows = [];
+
+    if (normalised.length > 0) {
+      // --- Ingredient-based search using fuzzy ILIKE matching ---
+      // For each detected ingredient, count how many recipe ingredients
+      // contain that word (e.g. "tomato" matches "diced tomatoes").
+      // We build a SUM of CASE expressions for each detected ingredient.
+      const matchCases = normalised
+        .map(
+          (_, idx) =>
+            `MAX(CASE WHEN LOWER(f.VALUE::STRING) ILIKE ? THEN 1 ELSE 0 END)`
+        )
+        .join(" + ");
+
+      const ingredientBinds = normalised.map((ing) => `%${ing}%`);
+
+      let promptClause = "";
+      const promptBinds = [];
+      if (promptKeywords.length > 0) {
+        const conditions = promptKeywords.map(() => "LOWER(r.TITLE) ILIKE ?");
+        promptClause = `HAVING (${conditions.join(" OR ")})`;
+        promptKeywords.forEach((kw) => promptBinds.push(`%${kw}%`));
+      }
+
+      // Use FLATTEN to check each recipe's ingredients array, then
+      // aggregate back to get a match score per recipe.
+      const sql = `
+        SELECT
+          r.TITLE,
+          r.INGREDIENTS,
+          r.STEPS,
+          r.TIME_TO_MAKE,
+          r.CALORIES,
+          r.PROTEIN_G,
+          r.FAT_G,
+          r.CARBS_G,
+          (${matchCases}) AS MATCH_SCORE
+        FROM RECIPES r,
+          TABLE(FLATTEN(input => r.INGREDIENTS)) f
+        GROUP BY r.ID, r.TITLE, r.INGREDIENTS, r.STEPS, r.TIME_TO_MAKE,
+                 r.CALORIES, r.PROTEIN_G, r.FAT_G, r.CARBS_G
+        HAVING MATCH_SCORE > 0
+        ${promptClause ? `AND (${promptClause.replace("HAVING ", "")})` : ""}
+        ORDER BY MATCH_SCORE DESC, r.CALORIES ASC
+        LIMIT 3
+      `;
+
+      rows = await querySnowflake(sql, [...ingredientBinds, ...promptBinds]);
+
+      // Fallback: drop prompt filter if no results
+      if (rows.length === 0 && promptBinds.length > 0) {
+        const fallbackSql = `
+          SELECT
+            r.TITLE,
+            r.INGREDIENTS,
+            r.STEPS,
+            r.TIME_TO_MAKE,
+            r.CALORIES,
+            r.PROTEIN_G,
+            r.FAT_G,
+            r.CARBS_G,
+            (${matchCases}) AS MATCH_SCORE
+          FROM RECIPES r,
+            TABLE(FLATTEN(input => r.INGREDIENTS)) f
+          GROUP BY r.ID, r.TITLE, r.INGREDIENTS, r.STEPS, r.TIME_TO_MAKE,
+                   r.CALORIES, r.PROTEIN_G, r.FAT_G, r.CARBS_G
+          HAVING MATCH_SCORE > 0
+          ORDER BY MATCH_SCORE DESC, r.CALORIES ASC
+          LIMIT 3
+        `;
+        rows = await querySnowflake(fallbackSql, ingredientBinds);
+      }
+    } else {
+      // --- Prompt-only search (no ingredients detected) ---
+      const conditions = promptKeywords.map(() => "LOWER(r.TITLE) ILIKE ?");
+      const sql = `
+        SELECT
+          r.TITLE,
+          r.INGREDIENTS,
+          r.STEPS,
+          r.TIME_TO_MAKE,
+          r.CALORIES,
+          r.PROTEIN_G,
+          r.FAT_G,
+          r.CARBS_G
+        FROM RECIPES r
+        WHERE ${conditions.join(" OR ")}
+        ORDER BY r.CALORIES ASC
+        LIMIT 3
+      `;
+      rows = await querySnowflake(
+        sql,
+        promptKeywords.map((kw) => `%${kw}%`)
+      );
+    }
+
+    if (rows.length === 0) {
+      return NextResponse.json(
+        { error: "No matching recipes found. Try different ingredients or a different prompt." },
+        { status: 404 }
+      );
+    }
+
+    // Map Snowflake rows → frontend recipe schema
+    const recipes = rows.map((row) => {
+      const parseArr = (val) => {
+        if (Array.isArray(val)) return val;
+        if (typeof val === "string") {
+          try {
+            return JSON.parse(val);
+          } catch {
+            return [];
+          }
+        }
+        return [];
+      };
+
+      return {
+        title: row.TITLE,
+        ingredients: parseArr(row.INGREDIENTS),
+        steps: parseArr(row.STEPS),
+        time_to_make: row.TIME_TO_MAKE || "Unknown",
+        nutrition: {
+          calories: `${Math.round(row.CALORIES || 0)} kcal`,
+          protein: `${Math.round(row.PROTEIN_G || 0)}g`,
+          fat: `${Math.round(row.FAT_G || 0)}g`,
+          carbohydrates: `${Math.round(row.CARBS_G || 0)}g`,
+        },
+      };
+    });
+
+    return NextResponse.json({ result: { recipes } });
+  } catch (error) {
+    console.error("Generate error:", error);
+    return NextResponse.json(
+      { error: "Failed to query recipes" },
+      { status: 500 }
+    );
+  }
 }

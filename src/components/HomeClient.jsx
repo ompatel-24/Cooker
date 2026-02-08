@@ -426,9 +426,11 @@ export default function HomeClient({ user }) {
     setLoading(true);
 
     try {
+      console.log("=== STARTING GENERATE ===");
       const base64Data = preview.split(",")[1];
       if (!base64Data) throw new Error("Invalid image data");
 
+      console.log("Calling Roboflow...");
       const roboflowResp = await fetch(
         "https://serverless.roboflow.com/infer/workflows/dataquest-ijnlj/custom-workflow",
         {
@@ -442,14 +444,27 @@ export default function HomeClient({ user }) {
         }
       );
 
+      console.log("Roboflow status:", roboflowResp.status);
+
       if (!roboflowResp.ok) {
         const txt = await roboflowResp.text().catch(() => "");
+        console.log("Roboflow error body:", txt);
         throw new Error(`Roboflow failed ${roboflowResp.status}: ${txt}`);
       }
 
       const rfJson = await roboflowResp.json();
-      const preds = rfJson.outputs?.[0]?.predictions;
-      const detectedIngredients = Array.isArray(preds) ? preds.map((p) => p.class) : [];
+      console.log("Roboflow raw response:", rfJson);
+      const rawPreds = rfJson.outputs?.[0]?.predictions;
+      console.log("Predictions object:", rawPreds);
+      // Handle both formats: direct array or nested { predictions: [...] }
+      const preds = Array.isArray(rawPreds)
+        ? rawPreds
+        : Array.isArray(rawPreds?.predictions)
+          ? rawPreds.predictions
+          : [];
+      const detectedIngredients = preds.map((p) => p.class || p.class_name).filter(Boolean);
+      console.log("Detected ingredients:", detectedIngredients);
+      console.log("Text prompt:", textInput);
 
       const genResp = await fetch("/api/generate", {
         method: "POST",
