@@ -281,35 +281,37 @@ const RecipeBlock = ({ recipe, onSave, onRemove, isSaved, canSave, onStartCookin
               </div>
             </div>
 
-            <div className="space-y-3">
-              <h4 className="font-semibold text-gray-800 dark:text-gray-100">Nutrition</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800 p-3">
-                  <div className="text-xs text-blue-800/80 dark:text-blue-100/80">Calories</div>
-                  <div className="text-lg font-semibold text-blue-900 dark:text-blue-50">
-                    {recipe?.nutrition?.calories ?? "—"}
+            {recipe.source === "snowflake" && (
+              <div className="space-y-3">
+                <h4 className="font-semibold text-gray-800 dark:text-gray-100">Nutrition</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800 p-3">
+                    <div className="text-xs text-blue-800/80 dark:text-blue-100/80">Calories</div>
+                    <div className="text-lg font-semibold text-blue-900 dark:text-blue-50">
+                      {recipe?.nutrition?.calories ?? "—"}
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-100 dark:border-green-800 p-3">
-                  <div className="text-xs text-green-800/80 dark:text-green-100/80">Protein</div>
-                  <div className="text-lg font-semibold text-green-900 dark:text-green-50">
-                    {recipe?.nutrition?.protein ?? "—"}
+                  <div className="rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-100 dark:border-green-800 p-3">
+                    <div className="text-xs text-green-800/80 dark:text-green-100/80">Protein</div>
+                    <div className="text-lg font-semibold text-green-900 dark:text-green-50">
+                      {recipe?.nutrition?.protein ?? "—"}
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-100 dark:border-yellow-800 p-3">
-                  <div className="text-xs text-yellow-800/80 dark:text-yellow-100/80">Fat</div>
-                  <div className="text-lg font-semibold text-yellow-900 dark:text-yellow-50">
-                    {recipe?.nutrition?.fat ?? "—"}
+                  <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-100 dark:border-yellow-800 p-3">
+                    <div className="text-xs text-yellow-800/80 dark:text-yellow-100/80">Fat</div>
+                    <div className="text-lg font-semibold text-yellow-900 dark:text-yellow-50">
+                      {recipe?.nutrition?.fat ?? "—"}
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-lg bg-purple-50 dark:bg-purple-900/30 border border-purple-100 dark:border-purple-800 p-3">
-                  <div className="text-xs text-purple-800/80 dark:text-purple-100/80">Carbs</div>
-                  <div className="text-lg font-semibold text-purple-900 dark:text-purple-50">
-                    {recipe?.nutrition?.carbohydrates || recipe?.nutrition?.carbs || "—"}
+                  <div className="rounded-lg bg-purple-50 dark:bg-purple-900/30 border border-purple-100 dark:border-purple-800 p-3">
+                    <div className="text-xs text-purple-800/80 dark:text-purple-100/80">Carbs</div>
+                    <div className="text-lg font-semibold text-purple-900 dark:text-purple-50">
+                      {recipe?.nutrition?.carbohydrates || recipe?.nutrition?.carbs || "—"}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div>

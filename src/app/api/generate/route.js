@@ -85,6 +85,7 @@ export async function POST(req) {
               fat: item.fat || "Unknown",
               carbohydrates: item.carbs || "Unknown",
             },
+            source: "external",
           };
         });
       } else {
@@ -225,6 +226,7 @@ export async function POST(req) {
             fat: `${Math.round(row.FAT_G || 0)}g`,
             carbohydrates: `${Math.round(row.CARBS_G || 0)}g`,
           },
+          source: "snowflake",
         };
       });
     }
